@@ -127,12 +127,24 @@ To send that signed Ubuntu 24.04 source package to the PPA:
 dput ppa:drmgiver/tres dist/ppa/noble/tres_1.0.0-1~ppa1~ubuntu24.04.1_source.changes
 ```
 
-For Ubuntu 26.04, run the same process with the separate `resolute` series:
+For Ubuntu 26.04, reuse the **exact** upstream source archive already
+accepted for Noble. The build script reads
+`dist/ppa/noble/tres_1.0.0.orig.tar.gz`, unpacks that immutable upstream
+source, and adds the Ubuntu-specific Debian changelog/packaging. Do not
+regenerate the original archive from newer Git commits: Launchpad rejects
+different contents under the same upstream archive filename.
 
 ```bash
 bash scripts/build-ppa-source.sh resolute
-dput ppa:drmgiver/tres dist/ppa/resolute/tres_1.0.0-1~ppa1~ubuntu26.04.1_source.changes
+dput -f ppa:drmgiver/tres dist/ppa/resolute/tres_1.0.0-1~ppa1~ubuntu26.04.1_source.changes
 ```
+
+The `-f` upload option handles a local `dput` record left by a prior
+rejected attempt. New signed source changes reference the original archive
+without reuploading it. **Keep the Noble original source archive**; if it is
+missing, restore the identical one from the first accepted PPA upload, not
+a newly compressed Git snapshot.
+
 
 Each version is unique to its Ubuntu release. Do not upload unsigned CI
 artifacts; Launchpad accepts source uploads signed by a registered key.
