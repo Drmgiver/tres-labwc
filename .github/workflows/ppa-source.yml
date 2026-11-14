@@ -23,12 +23,8 @@ permissions:
 
 jobs:
   source:
-    name: Unsigned source review (${{ matrix.series }})
+    name: Validate paired Noble and Resolute sources
     runs-on: ubuntu-24.04
-    strategy:
-      fail-fast: false
-      matrix:
-        series: [noble, resolute]
     steps:
       - name: Checkout committed source
         uses: actions/checkout@v4
@@ -36,28 +32,42 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential debhelper dh-python dpkg-dev devscripts lintian python3
-      - name: Build unsigned source (review only; signing happens locally)
-        run: bash scripts/build-ppa-source.sh "${{ matrix.series }}" --unsigned
-      - name: Verify Ubuntu series, version, and source-only upload
+      - name: Bootstrap unsigned Noble source for CI review
+        run: bash scripts/build-ppa-source.sh noble --unsigned
+      - name: Build Resolute source reusing exact Noble orig archive
+        run: bash scripts/build-ppa-source.sh resolute --unsigned
+      - name: Verify paired Ubuntu source uploads
         run: |
-          case "${{ matrix.series }}" in
-            noble) version='1.0.0-1~ppa1~ubuntu24.04.1' ;;
-            resolute) version='1.0.0-1~ppa1~ubuntu26.04.1' ;;
-          esac
-          changes="dist/ppa/${{ matrix.series }}/tres_${version}_source.changes"
-          test -s "$changes"
-          grep -Fx "Distribution: ${{ matrix.series }}" "$changes"
-          grep -Fx "Version: $version" "$changes"
-          grep -Fx 'Architecture: source' "$changes"
-          test -s "dist/ppa/${{ matrix.series }}/tres_1.0.0.orig.tar.gz"
-          test -s "dist/ppa/${{ matrix.series }}/tres_${version}.dsc"
-          test -s "dist/ppa/${{ matrix.series }}/tres_${version}_source.buildinfo"
-      - name: Lint source package (report for review)
+          for series in noble resolute; do
+            case "$series" in
+              noble) version='1.0.0-1~ppa1~ubuntu24.04.1' ;;
+              resolute) version='1.0.0-1~ppa1~ubuntu26.04.1' ;;
+            esac
+            changes="dist/ppa/$series/tres_${version}_source.changes"
+            test -s "$changes"
+            grep -Fx "Distribution: $series" "$changes"
+            grep -Fx "Version: $version" "$changes"
+            grep -Fx "Architecture: source" "$changes"
+            test -s "dist/ppa/$series/tres_1.0.0.orig.tar.gz"
+            test -s "dist/ppa/$series/tres_${version}.dsc"
+            test -s "dist/ppa/$series/tres_${version}_source.buildinfo"
+          done
+          cmp dist/ppa/noble/tres_1.0.0.orig.tar.gz dist/ppa/resolute/tres_1.0.0.orig.tar.gz
+          ! grep -F 'tres_1.0.0.orig.tar.gz' dist/ppa/resolute/tres_1.0.0-1~ppa1~ubuntu26.04.1_source.changes
+      - name: Lint source packages (report only)
         run: |
-          lintian dist/ppa/${{ matrix.series }}/*.dsc 2>&1 | tee "dist/ppa/${{ matrix.series }}/lintian-source.txt" || true
-      - name: Upload unsigned review artifacts
+          for series in noble resolute; do
+            lintian dist/ppa/"$series"/*.dsc 2>&1 | tee "dist/ppa/$series/lintian-source.txt" || true
+          done
+      - name: Upload unsigned Noble review artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: tres-ppa-${{ matrix.series }}-unsigned
-          path: dist/ppa/${{ matrix.series }}/
+          name: tres-ppa-noble-unsigned
+          path: dist/ppa/noble/
+          if-no-files-found: error
+      - name: Upload unsigned Resolute review artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: tres-ppa-resolute-unsigned
+          path: dist/ppa/resolute/
           if-no-files-found: error
