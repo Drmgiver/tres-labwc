@@ -31,8 +31,37 @@ fi
 
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
-mkdir -p "$tmp/tres-1.0.0"
-git archive --format=tar HEAD | tar -xf - -C "$tmp/tres-1.0.0"
+# Upstream source archives are immutable across Ubuntu series. Noble was
+# accepted first, so its exact .orig.tar.gz is the canonical Tres 1.0 source.
+# Never regenerate a different tarball under the same upstream version.
+canonical_orig="$root/dist/ppa/noble/tres_1.0.0.orig.tar.gz"
+if [[ -f $canonical_orig ]]; then
+  cp "$canonical_orig" "$tmp/tres_1.0.0.orig.tar.gz"
+  tar -xzf "$tmp/tres_1.0.0.orig.tar.gz" -C "$tmp"
+  test -d "$tmp/tres-1.0.0" || {
+    echo "Unexpected directory structure in the canonical Tres 1.0 tarball." >&2
+    exit 1
+  }
+  include_orig=no
+elif [[ $mode == --unsigned && $series == noble ]]; then
+  # CI-only bootstrap of a sample orig archive. Its content is NOT guaranteed
+  # to match the one already accepted by Launchpad.
+  mkdir -p "$tmp/tres-1.0.0"
+  git archive --format=tar HEAD | tar -xf - -C "$tmp/tres-1.0.0"
+  tar -C "$tmp" --exclude='tres-1.0.0/debian' -czf "$tmp/tres_1.0.0.orig.tar.gz" tres-1.0.0
+  include_orig=yes
+else
+  echo "Missing the original Tres 1.0 source archive:" >&2
+  echo "  $canonical_orig" >&2
+  echo "Do not regenerate it from the current Git checkout." >&2
+  echo "Restore the exact noble archive from your first accepted upload." >&2
+  exit 1
+fi
+
+# Packaging metadata can evolve, but the upstream content must come from
+# that frozen original tarball, not a newer HEAD revision.
+rm -rf "$tmp/tres-1.0.0/debian"
+cp -a "$root/debian" "$tmp/tres-1.0.0/debian"
 
 # The Debian changelog stays 'unstable' in Git. Ubuntu-targeted entries
 # exist only in the temporary source package, never in the source repo.
@@ -45,19 +74,19 @@ changelog="$tmp/tres-1.0.0/debian/changelog"
 } > "$tmp/changelog.new"
 mv "$tmp/changelog.new" "$changelog"
 
-# A 3.0 (quilt) source package requires an orig tarball containing upstream
-# files, but not the debian/ packaging directory.
-tar -C "$tmp" --exclude='tres-1.0.0/debian' -czf "$tmp/tres_1.0.0.orig.tar.gz" tres-1.0.0
-
+# The initial CI test includes the orig tarball. Subsequent signed uploads
+# reference the archive already in Launchpad, without re-uploading it.
 cd "$tmp/tres-1.0.0"
+source_include_flag=-sd
+if [[ $include_orig == yes ]]; then source_include_flag=-sa; fi
 if [[ $mode == --unsigned ]]; then
-  dpkg-buildpackage -S -sa --no-sign
+  dpkg-buildpackage -S "$source_include_flag" --no-sign
 else
   gpg --list-secret-keys "$key" >/dev/null || {
     echo "The Tres signing key is not available in this GPG keyring." >&2
     exit 1
   }
-  dpkg-buildpackage -S -sa -k"$key"
+  dpkg-buildpackage -S "$source_include_flag" -k"$key"
 fi
 
 output="$root/dist/ppa/$series"
